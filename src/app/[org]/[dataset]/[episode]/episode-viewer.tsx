@@ -10,6 +10,25 @@ import { TimeProvider, useTime } from "@/context/time-context";
 import Sidebar from "@/components/side-nav";
 import Loading from "@/components/loading-component";
 import { getAdjacentEpisodesVideoInfo } from "./fetch-data";
+import { resolveS3ProxyUrl } from "@/utils/versionUtils";
+
+// Recursively convert all s3-proxy: URLs in an object
+function convertS3ProxyUrls(obj: any): any {
+  if (typeof obj === 'string') {
+    return resolveS3ProxyUrl(obj);
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(convertS3ProxyUrls);
+  }
+  if (obj && typeof obj === 'object') {
+    const converted: any = {};
+    for (const key in obj) {
+      converted[key] = convertS3ProxyUrls(obj[key]);
+    }
+    return converted;
+  }
+  return obj;
+}
 
 export default function EpisodeViewer({
   data,
@@ -22,6 +41,17 @@ export default function EpisodeViewer({
   org?: string;
   dataset?: string;
 }) {
+  // Convert all s3-proxy: URLs to proper HTTP URLs on mount
+  const [convertedData, setConvertedData] = useState<any>(null);
+  const [isConverted, setIsConverted] = useState(false);
+  
+  useEffect(() => {
+    if (data && !isConverted) {
+      setConvertedData(convertS3ProxyUrls(data));
+      setIsConverted(true);
+    }
+  }, [data, isConverted]);
+  
   if (error) {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-950 text-red-400">
@@ -32,9 +62,19 @@ export default function EpisodeViewer({
       </div>
     );
   }
+  
+  // Wait for conversion to complete before rendering
+  if (!convertedData || !isConverted) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-950">
+        <Loading />
+      </div>
+    );
+  }
+  
   return (
-    <TimeProvider duration={data.duration}>
-      <EpisodeViewerInner data={data} org={org} dataset={dataset} />
+    <TimeProvider duration={convertedData.duration}>
+      <EpisodeViewerInner data={convertedData} org={org} dataset={dataset} />
     </TimeProvider>
   );
 }

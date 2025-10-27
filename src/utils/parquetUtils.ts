@@ -25,13 +25,24 @@ export interface DatasetMetadata {
 }
 
 export async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) {
+  let response: Response;
+  
+  if (url.startsWith('s3-proxy:')) {
+    // Handle S3 proxy URLs
+    const path = url.replace('s3-proxy:', '');
+    const { fetchFromS3 } = await import('./versionUtils');
+    response = await (fetchFromS3 as any)(path);
+  } else {
+    // Handle regular URLs
+    response = await fetch(url);
+  }
+  
+  if (!response.ok) {
     throw new Error(
-      `Failed to fetch JSON ${url}: ${res.status} ${res.statusText}`,
+      `Failed to fetch JSON ${url}: ${response.status} ${response.statusText}`,
     );
   }
-  return res.json() as Promise<T>;
+  return response.json() as Promise<T>;
 }
 
 export function formatStringWithVars(
@@ -43,13 +54,23 @@ export function formatStringWithVars(
 
 // Fetch and parse the Parquet file
 export async function fetchParquetFile(url: string): Promise<ArrayBuffer> {
-  const res = await fetch(url);
+  let response: Response;
   
-  if (!res.ok) {
-    throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
+  if (url.startsWith('s3-proxy:')) {
+    // Handle S3 proxy URLs
+    const path = url.replace('s3-proxy:', '');
+    const { fetchFromS3 } = await import('./versionUtils');
+    response = await (fetchFromS3 as any)(path);
+  } else {
+    // Handle regular URLs
+    response = await fetch(url);
   }
   
-  return res.arrayBuffer();
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
+  }
+  
+  return response.arrayBuffer();
 }
 
 // Read specific columns from the Parquet file

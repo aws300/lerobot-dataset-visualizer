@@ -7,7 +7,17 @@ import {
   readParquetAsObjects,
 } from "@/utils/parquetUtils";
 import { pick } from "@/utils/pick";
-import { getDatasetVersion, buildVersionedUrl } from "@/utils/versionUtils";
+import { getDatasetVersion, buildVersionedUrl, fetchFromS3 } from "@/utils/versionUtils";
+
+// Helper function to handle both regular URLs and S3 proxy URLs
+async function universalFetch(url: string): Promise<Response> {
+  if (url.startsWith('s3-proxy:')) {
+    const path = url.replace('s3-proxy:', '');
+    return await fetchFromS3(path);
+  } else {
+    return await fetch(url);
+  }
+}
 
 const SERIES_NAME_DELIMITER = " | ";
 
@@ -240,7 +250,7 @@ async function getEpisodeDataV2(
   if (!task && allData.length > 0) {
     try {
       const tasksUrl = buildVersionedUrl(repoId, version, "meta/tasks.jsonl");
-      const tasksResponse = await fetch(tasksUrl);
+      const tasksResponse = await universalFetch(tasksUrl);
       
       if (tasksResponse.ok) {
         const tasksText = await tasksResponse.text();

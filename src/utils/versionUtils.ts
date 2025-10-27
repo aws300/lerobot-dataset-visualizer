@@ -2,7 +2,55 @@
  * Utility functions for checking dataset version compatibility
  */
 
-const DATASET_URL = process.env.DATASET_URL || "https://huggingface.co/datasets";
+const USE_HUGGINGFACE = process.env.NEXT_PUBLIC_USE_HUGGINGFACE === "true";
+const S3_DATASET_PREFIX = process.env.NEXT_PUBLIC_S3_DATASET_PREFIX || "s3://xlab-eks/datasets/";
+const DATASET_URL = USE_HUGGINGFACE 
+  ? (process.env.DATASET_URL || "https://huggingface.co/datasets")
+  : S3_DATASET_PREFIX;
+
+/**
+ * Fetch data from S3 directly (server-side) or via API proxy (client-side)
+ */
+export async function fetchFromS3(path: string): Promise<Response> {
+  if (typeof window !== 'undefined') {
+    // Client side - use API proxy
+    return fetch(`${window.location.origin}/api/s3-proxy?path=${encodeURIComponent(path)}`);
+  } else {
+    // Server side - call S3 directly
+    const { S3Client, GetObjectCommand } = await import('@aws-sdk/client-s3');
+    
+    const s3Prefix = S3_DATASET_PREFIX.replace(/\/$/, '');
+    const s3Path = `${s3Prefix}/${path}`;
+    const s3Url = s3Path.startsWith('s3://') ? s3Path.substring(5) : s3Path;
+    const [bucket, ...keyParts] = s3Url.split('/');
+    const key = keyParts.join('/');
+
+    const client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
+    const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+
+    try {
+      const response = await client.send(command);
+      if (!response.Body) {
+        throw new Error('Empty response from S3');
+      }
+
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of response.Body as any) {
+        chunks.push(chunk);
+      }
+      const buffer = Buffer.concat(chunks);
+
+      return new Response(buffer, {
+        status: 200,
+        headers: {
+          'Content-Type': response.ContentType || 'application/octet-stream',
+        },
+      });
+    } catch (error: any) {
+      throw new Error(`Failed to fetch from S3: ${error.message}`);
+    }
+  }
+}
 
 /**
  * Dataset information structure from info.json
@@ -28,18 +76,24 @@ interface DatasetInfo {
  */
 export async function getDatasetInfo(repoId: string): Promise<DatasetInfo> {
   try {
-    const testUrl = `${DATASET_URL}/${repoId}/resolve/main/meta/info.json`;
+    let response: Response;
     
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-    
-    const response = await fetch(testUrl, { 
-      method: "GET",
-      cache: "no-store",
-      signal: controller.signal
-    });
-    
-    clearTimeout(timeoutId);
+    if (USE_HUGGINGFACE) {
+      const testUrl = `${DATASET_URL}/${repoId}/resolve/main/meta/info.json`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
+      response = await fetch(testUrl, { 
+        method: "GET",
+        cache: "no-store",
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+    } else {
+      // Use direct S3 access or API proxy
+      response = await fetchFromS3(`${repoId}/meta/info.json`);
+    }
     
     if (!response.ok) {
       throw new Error(`Failed to fetch dataset info: ${response.status}`);
@@ -101,6 +155,22 @@ export async function getDatasetVersion(repoId: string): Promise<string> {
 }
 
 export function buildVersionedUrl(repoId: string, version: string, path: string): string {
-  return `${DATASET_URL}/${repoId}/resolve/main/${path}`;
+  if (USE_HUGGINGFACE) {
+    return `${DATASET_URL}/${repoId}/resolve/main/${path}`;
+  } else {
+    // Always return s3-proxy: marker - will be converted by fetch functions or client-side
+    return `s3-proxy:${repoId}/${path}`;
+  }
+}
+
+/**
+ * Convert s3-proxy: URL to HTTP URL (client-side only)
+ */
+export function resolveS3ProxyUrl(url: string): string {
+  if (url.startsWith('s3-proxy:') && typeof window !== 'undefined') {
+    const path = url.replace('s3-proxy:', '');
+    return `${window.location.origin}/api/s3-proxy?path=${encodeURIComponent(path)}`;
+  }
+  return url;
 }
 

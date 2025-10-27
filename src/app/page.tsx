@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, Suspense } from "react";
+import { useEffect, useRef, Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSearchParams } from "next/navigation";
@@ -15,6 +15,15 @@ export default function Home() {
 function HomeInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [datasets, setDatasets] = useState<string[]>([]);
+
+  // Fetch datasets from S3
+  useEffect(() => {
+    fetch('/api/list-datasets')
+      .then(res => res.json())
+      .then(data => setDatasets(data.datasets || []))
+      .catch(err => console.error('Failed to fetch datasets:', err));
+  }, []);
 
   // Handle redirects with useEffect instead of direct redirect
   useEffect(() => {
@@ -151,15 +160,11 @@ function HomeInner() {
             Go
           </button>
         </form>
-        {/* Example Datasets */}
+        {/* Private Datasets */}
         <div className="mt-8">
-          <div className="font-semibold mb-2 text-lg">Example Datasets:</div>
+          <div className="font-semibold mb-2 text-lg">Private Datasets:</div>
           <div className="flex flex-col gap-2 items-center">
-            {[
-              "lerobot/aloha_static_cups_open",
-              "lerobot/columbia_cairlab_pusht_real",
-              "lerobot/taco_play",
-            ].map((ds) => (
+            {datasets.map((ds) => (
               <button
                 key={ds}
                 type="button"
